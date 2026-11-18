@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:muarra_app_v1/features/auth/services/auth_service.dart';
 import 'package:muarra_app_v1/core/constants/app_colors.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -40,9 +41,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
     if (confirmed != true) return;
 
-    // TODO: hapus sesi/token di sini, contoh:
-    // await AuthService.signOut();
-    // atau FirebaseAuth.instance.signOut();
+    await AuthService().logout();
+
+    if (!context.mounted) return;
 
     if (!mounted) return;
     context.go('/signin');

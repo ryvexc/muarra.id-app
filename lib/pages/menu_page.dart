@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:muarra_app_v1/core/constants/app_colors.dart';
+import 'package:muarra_app_v1/models/discount.dart';
 import 'package:muarra_app_v1/models/food_item.dart';
 import 'package:muarra_app_v1/widgets/checkout_panel.dart';
 import 'package:muarra_app_v1/widgets/food_card.dart';
@@ -19,6 +20,8 @@ class _MenuPageState extends State<MenuPage> {
 
   /// key = food.id
   final Map<String, CartItem> cart = {};
+
+  Discount? appliedDiscount;
 
   List<String> get categories => [
     allCategory,
@@ -53,16 +56,27 @@ class _MenuPageState extends State<MenuPage> {
     });
   }
 
+  void _clearCart() {
+    setState(() {
+      cart.clear();
+      appliedDiscount = null;
+    });
+  }
+
   Future<void> _checkout() async {
-    final total = cart.values.fold<int>(0, (s, e) => s + e.total);
-    final grand = total + (total * CheckoutPanel.taxRate).round();
+    final subtotal = cart.values.fold<int>(0, (s, e) => s + e.total);
+    final discount = appliedDiscount?.amountFor(subtotal) ?? 0;
+    final taxable = subtotal - discount;
+    final grand = taxable + (taxable * CheckoutPanel.taxRate).round();
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Konfirmasi Pesanan'),
         content: Text(
-          '${cart.length} jenis menu\nTotal: ${formatRupiah(grand)}',
+          '${cart.length} jenis menu\n'
+          '${discount > 0 ? 'Diskon: -${formatRupiah(discount)}\n' : ''}'
+          'Total: ${formatRupiah(grand)}',
         ),
         actions: [
           TextButton(
@@ -83,7 +97,7 @@ class _MenuPageState extends State<MenuPage> {
 
     if (confirmed == true && mounted) {
       // TODO: kirim order ke backend / simpan ke database
-      setState(cart.clear);
+      _clearCart();
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Pesanan berhasil dibuat')));
@@ -142,9 +156,12 @@ class _MenuPageState extends State<MenuPage> {
         // CHECKOUT
         CheckoutPanel(
           items: cart.values.toList(),
+          appliedDiscount: appliedDiscount,
+          onApplyDiscount: (d) => setState(() => appliedDiscount = d),
+          onRemoveDiscount: () => setState(() => appliedDiscount = null),
           onIncrement: (item) => setState(() => item.qty++),
           onDecrement: _decrement,
-          onClear: () => setState(cart.clear),
+          onClear: _clearCart,
           onCheckout: _checkout,
         ),
       ],
