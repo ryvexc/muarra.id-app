@@ -6,6 +6,7 @@ import 'package:muarra_app_v1/core/constants/app_colors.dart';
 import 'package:muarra_app_v1/models/discount.dart';
 import 'package:muarra_app_v1/models/food_item.dart';
 import 'package:muarra_app_v1/models/payment_type.dart';
+import 'package:muarra_app_v1/core/services/api_client.dart';
 
 class CheckoutPage extends StatelessWidget {
   final List<CartItem> items;
@@ -78,6 +79,7 @@ class CheckoutPage extends StatelessWidget {
       customerName: customerName,
       total: total,
       onCreateOrder: onCreateOrder,
+      onPaid: onPaid,
       payload: orderPayload,
     );
   }
@@ -282,16 +284,13 @@ class CheckoutPage extends StatelessWidget {
   );
 }
 
-// =========================
-// QRIS MIDTRANS
-// =========================
-
 class QrisPaymentWidget extends StatefulWidget {
   final String? customerName;
   final int total;
   final Map<String, dynamic> payload;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic> payload)
   onCreateOrder;
+  final void Function(Map<String, dynamic> orderResponse) onPaid;
 
   const QrisPaymentWidget({
     super.key,
@@ -299,6 +298,7 @@ class QrisPaymentWidget extends StatefulWidget {
     required this.total,
     required this.payload,
     required this.onCreateOrder,
+    required this.onPaid,
   });
 
   @override
@@ -310,11 +310,65 @@ class _QrisPaymentWidgetState extends State<QrisPaymentWidget> {
   String? errorMessage;
   String? qrUrl;
   String? transactionId;
+  int? orderId;
+  bool _isCancelling = false;
+  bool _allowPop = false;
+  Timer? _paymentTimer;
+  String _paymentStatus = 'pending';
+  Map<String, dynamic>? _orderResponse;
+  bool _hasHandledPaid = false;
 
   @override
   void initState() {
     super.initState();
     _createQrisOrder();
+  }
+
+  void _startPaymentPolling() {
+    _paymentTimer?.cancel();
+
+    _checkPaymentStatus();
+
+    _paymentTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _checkPaymentStatus(),
+    );
+  }
+
+  Future<void> _checkPaymentStatus() async {
+    if (orderId == null || !mounted || _hasHandledPaid) return;
+
+    try {
+      final response = await ApiClient.dio.get('/orders/status/$orderId');
+
+      final status = response.data['data']['payment_status'];
+
+      if (!mounted) return;
+
+      if (status != _paymentStatus) {
+        setState(() => _paymentStatus = status);
+      }
+
+      if (status == 'paid') {
+        _paymentTimer?.cancel();
+        _paymentTimer = null;
+
+        if (!_hasHandledPaid && _orderResponse != null) {
+          _hasHandledPaid = true;
+
+          widget.onPaid(_orderResponse!);
+        }
+
+        return;
+      }
+
+      if (status == 'cancelled' || status == 'expired' || status == 'denied') {
+        _paymentTimer?.cancel();
+        _paymentTimer = null;
+      }
+    } catch (e) {
+      debugPrint('Payment status check failed: $e');
+    }
   }
 
   Future<void> _createQrisOrder() async {
@@ -330,15 +384,11 @@ class _QrisPaymentWidgetState extends State<QrisPaymentWidget> {
     try {
       final response = await widget.onCreateOrder(widget.payload);
 
-      // Response dari Laravel:
-      // {
-      //   "data": {...},
-      //   "qris": {
-      //     "transaction_id": "...",
-      //     "transaction_status": "pending",
-      //     "qr_url": "https://..."
-      //   }
-      // }
+      _orderResponse = response;
+      _hasHandledPaid = false;
+
+      // Simpan ID order segera setelah order berhasil dibuat
+      orderId = int.tryParse(response['data']['id'].toString());
 
       final qris = response['qris'];
 
@@ -348,11 +398,15 @@ class _QrisPaymentWidgetState extends State<QrisPaymentWidget> {
 
       if (!mounted) return;
 
+      debugPrint('QR URL: ${qris['qr_url'].toString()}');
+
       setState(() {
         qrUrl = qris['qr_url'].toString();
         transactionId = qris['transaction_id']?.toString();
         isLoading = false;
       });
+
+      _startPaymentPolling();
     } catch (e) {
       if (!mounted) return;
 
@@ -363,141 +417,207 @@ class _QrisPaymentWidgetState extends State<QrisPaymentWidget> {
     }
   }
 
+  Future<void> _cancelAndExit() async {
+    if (_isCancelling) return;
+
+    // Order belum berhasil dibuat, jadi tidak ada yang perlu di-cancel di server.
+    if (orderId == null) {
+      if (isLoading) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Order sedang dibuat, tunggu sebentar.'),
+          ),
+        );
+        return;
+      }
+
+      _allowPop = true;
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+
+    setState(() => _isCancelling = true);
+
+    try {
+      await ApiClient.dio.post('/orders/cancel/$orderId');
+
+      if (!mounted) return;
+
+      setState(() {
+        _isCancelling = false;
+        _allowPop = true;
+      });
+
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => _isCancelling = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Gagal membatalkan order: ${e.toString().replaceFirst('Exception: ', '')}',
+          ),
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _paymentTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 460,
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            'Pembayaran QRIS',
-            style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800),
-          ),
-
-          const SizedBox(height: 8),
-
-          const Text(
-            'Scan QR code di bawah untuk membayar',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Color(0xFF858B98)),
-          ),
-
-          const SizedBox(height: 28),
-
-          // QR image from Midtrans
-          Container(
-            width: 252,
-            height: 252,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
-              borderRadius: BorderRadius.circular(20),
+    return PopScope<Object?>(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && !_allowPop) {
+          _cancelAndExit();
+        }
+      },
+      child: Container(
+        width: 460,
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
             ),
-            child: _buildQrContent(),
-          ),
-
-          const SizedBox(height: 24),
-
-          if (widget.customerName != null &&
-              widget.customerName!.isNotEmpty) ...[
-            Text(
-              widget.customerName!,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Pembayaran QRIS',
+              style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800),
             ),
+
             const SizedBox(height: 8),
-          ],
 
-          const Text(
-            'Total Pembayaran',
-            style: TextStyle(color: Color(0xFF858B98)),
-          ),
-
-          const SizedBox(height: 6),
-
-          Text(
-            formatRupiah(widget.total),
-            style: const TextStyle(
-              fontSize: 30,
-              fontWeight: FontWeight.w900,
-              color: AppColors.primaryColor,
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          if (!isLoading && errorMessage == null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF7E6),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.access_time_rounded,
-                    color: Color(0xFFB7791F),
-                    size: 18,
-                  ),
-                  SizedBox(width: 6),
-                  Text(
-                    'Menunggu pembayaran',
-                    style: TextStyle(
-                      color: Color(0xFFB7791F),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          if (transactionId != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              'Transaction ID: $transactionId',
+            const Text(
+              'Scan QR code di bawah untuk membayar',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF858B98)),
+              style: TextStyle(color: Color(0xFF858B98)),
             ),
-          ],
 
-          const SizedBox(height: 24),
+            const SizedBox(height: 28),
 
-          if (errorMessage != null)
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _createQrisOrder,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Coba Lagi'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryColor,
-                  foregroundColor: Colors.white,
+            Container(
+              width: 252,
+              height: 252,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: _buildQrContent(),
+            ),
+
+            const SizedBox(height: 24),
+
+            if (widget.customerName != null &&
+                widget.customerName!.isNotEmpty) ...[
+              Text(
+                widget.customerName!,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
+              const SizedBox(height: 8),
+            ],
+
+            const Text(
+              'Total Pembayaran',
+              style: TextStyle(color: Color(0xFF858B98)),
             ),
 
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: isLoading ? null : () => Navigator.pop(context),
-              child: const Text('Kembali'),
+            const SizedBox(height: 6),
+
+            Text(
+              formatRupiah(widget.total),
+              style: const TextStyle(
+                fontSize: 30,
+                fontWeight: FontWeight.w900,
+                color: AppColors.primaryColor,
+              ),
             ),
-          ),
-        ],
+
+            const SizedBox(height: 16),
+
+            if (!isLoading && errorMessage == null)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7E6),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.access_time_rounded,
+                      color: Color(0xFFB7791F),
+                      size: 18,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      'Menunggu pembayaran',
+                      style: TextStyle(
+                        color: Color(0xFFB7791F),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            if (transactionId != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Transaction ID: $transactionId',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 11, color: Color(0xFF858B98)),
+              ),
+            ],
+
+            const SizedBox(height: 24),
+
+            if (errorMessage != null)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _createQrisOrder,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Coba Lagi'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryColor,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: (isLoading || _isCancelling) ? null : _cancelAndExit,
+                child: Text(_isCancelling ? 'Membatalkan...' : 'Kembali'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
