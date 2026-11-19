@@ -14,6 +14,28 @@ class _SettingsPageState extends State<SettingsPage> {
   bool notificationsEnabled = true;
   bool soundEnabled = true;
 
+  Map<String, dynamic>? currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    try {
+      final user = await AuthService().getMe();
+
+      if (!mounted) return;
+
+      setState(() {
+        currentUser = user;
+      });
+    } catch (e) {
+      debugPrint('Failed to load profile: $e');
+    }
+  }
+
   Future<void> _logout() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -92,22 +114,22 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ),
                       const SizedBox(width: 16),
-                      const Expanded(
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Administrator',
-                              style: TextStyle(
+                              currentUser?['name'] ?? 'Loading...',
+                              style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
                                 color: Color(0xFF111318),
                               ),
                             ),
-                            SizedBox(height: 3),
+                            const SizedBox(height: 3),
                             Text(
-                              'admin@muarra.id',
-                              style: TextStyle(
+                              currentUser?['email'] ?? '',
+                              style: const TextStyle(
                                 fontSize: 13,
                                 color: Color(0xFF858B98),
                               ),
@@ -121,56 +143,55 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ),
 
-            const SizedBox(height: 24),
-            const _SectionLabel('AKUN'),
-            _SectionCard(
-              children: [
-                _SettingsTile(
-                  icon: Icons.person_outline_rounded,
-                  title: 'Edit Profil',
-                  onTap: () {
-                    // TODO: navigasi ke halaman edit profil
-                  },
-                ),
-                const _TileDivider(),
-                _SettingsTile(
-                  icon: Icons.lock_outline_rounded,
-                  title: 'Ubah Password',
-                  onTap: () {
-                    // TODO: navigasi ke halaman ubah password
-                  },
-                ),
-              ],
-            ),
+            // const SizedBox(height: 24),
+            // const _SectionLabel('AKUN'),
+            // _SectionCard(
+            //   children: [
+            //     _SettingsTile(
+            //       icon: Icons.person_outline_rounded,
+            //       title: 'Edit Profil',
+            //       onTap: () {
+            //         // TODO: navigasi ke halaman edit profil
+            //       },
+            //     ),
+            //     const _TileDivider(),
+            //     _SettingsTile(
+            //       icon: Icons.lock_outline_rounded,
+            //       title: 'Ubah Password',
+            //       onTap: () {
+            //         // TODO: navigasi ke halaman ubah password
+            //       },
+            //     ),
+            //   ],
+            // ),
 
-            const SizedBox(height: 24),
-            const _SectionLabel('PREFERENSI'),
-            _SectionCard(
-              children: [
-                _SettingsTile(
-                  icon: Icons.notifications_none_rounded,
-                  title: 'Notifikasi',
-                  trailing: Switch(
-                    value: notificationsEnabled,
-                    activeThumbColor: Colors.white,
-                    activeTrackColor: AppColors.primaryColor,
-                    onChanged: (v) => setState(() => notificationsEnabled = v),
-                  ),
-                ),
-                const _TileDivider(),
-                _SettingsTile(
-                  icon: Icons.volume_up_outlined,
-                  title: 'Suara',
-                  trailing: Switch(
-                    value: soundEnabled,
-                    activeThumbColor: Colors.white,
-                    activeTrackColor: AppColors.primaryColor,
-                    onChanged: (v) => setState(() => soundEnabled = v),
-                  ),
-                ),
-              ],
-            ),
-
+            // const SizedBox(height: 24),
+            // const _SectionLabel('PREFERENSI'),
+            // _SectionCard(
+            //   children: [
+            //     _SettingsTile(
+            //       icon: Icons.notifications_none_rounded,
+            //       title: 'Notifikasi',
+            //       trailing: Switch(
+            //         value: notificationsEnabled,
+            //         activeThumbColor: Colors.white,
+            //         activeTrackColor: AppColors.primaryColor,
+            //         onChanged: (v) => setState(() => notificationsEnabled = v),
+            //       ),
+            //     ),
+            //     const _TileDivider(),
+            //     _SettingsTile(
+            //       icon: Icons.volume_up_outlined,
+            //       title: 'Suara',
+            //       trailing: Switch(
+            //         value: soundEnabled,
+            //         activeThumbColor: Colors.white,
+            //         activeTrackColor: AppColors.primaryColor,
+            //         onChanged: (v) => setState(() => soundEnabled = v),
+            //       ),
+            //     ),
+            //   ],
+            // ),
             const SizedBox(height: 24),
             const _SectionLabel('LAINNYA'),
             _SectionCard(

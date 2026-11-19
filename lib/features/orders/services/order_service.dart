@@ -24,4 +24,12 @@ class OrderService {
       throw Exception('Gagal membuat order: $e');
     }
   }
+
+  Future<List<Map<String, dynamic>>> getOrders() async {
+    final response = await ApiClient.dio.get('/orders');
+
+    final data = response.data['data'] as List;
+
+    return data.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:muarra_app_v1/features/auth/services/auth_service.dart';
 
 class AppSidebar extends StatefulWidget {
   final int selectedIndex;
@@ -26,11 +27,30 @@ class _AppSidebarState extends State<AppSidebar> {
   final List<Map<String, dynamic>> menus = [
     {'title': 'Home', 'icon': Icons.grid_view_rounded},
     {'title': 'Diskon', 'icon': Icons.sell_outlined},
-    {'title': 'Users', 'icon': Icons.people_outline_rounded},
     {'title': 'Orders', 'icon': Icons.shopping_bag_outlined},
-    {'title': 'Analytics', 'icon': Icons.bar_chart_rounded},
-    {'title': 'Products', 'icon': Icons.inventory_2_outlined},
   ];
+
+  Map<String, dynamic>? currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    try {
+      final user = await AuthService().getMe();
+
+      if (!mounted) return;
+
+      setState(() {
+        currentUser = user;
+      });
+    } catch (e) {
+      debugPrint('Failed to load profile: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -296,6 +316,9 @@ class _AppSidebarState extends State<AppSidebar> {
 
   // PROFILE
   Widget _buildProfile(bool isExpanded) {
+    final name = currentUser?['name'] ?? 'Loading...';
+    final email = currentUser?['email'] ?? '';
+
     return Container(
       padding: EdgeInsets.all(isExpanded ? 10 : 4),
       decoration: BoxDecoration(
@@ -314,25 +337,25 @@ class _AppSidebarState extends State<AppSidebar> {
           ),
           if (isExpanded) ...[
             const SizedBox(width: 10),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Administrator',
+                    name,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  SizedBox(height: 3),
+                  const SizedBox(height: 3),
                   Text(
-                    'admin@muarra.id',
+                    email,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: mutedColor, fontSize: 9),
+                    style: const TextStyle(color: mutedColor, fontSize: 9),
                   ),
                 ],
               ),
