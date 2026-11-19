@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:muarra_app_v1/core/constants/app_colors.dart';
+import 'package:muarra_app_v1/features/products/services/product_service.dart';
 import 'package:muarra_app_v1/models/discount.dart';
 import 'package:muarra_app_v1/models/food_item.dart';
 import 'package:muarra_app_v1/widgets/checkout_panel.dart';
 import 'package:muarra_app_v1/widgets/food_card.dart';
+import 'package:muarra_app_v1/features/discounts/services/discount_service.dart';
+import 'package:muarra_app_v1/features/checkout/pages/checkout_page.dart';
+import 'package:muarra_app_v1/models/payment_type.dart';
+import 'package:muarra_app_v1/features/orders/services/order_service.dart';
 
 class MenuPage extends StatefulWidget {
   const MenuPage({super.key});
@@ -21,19 +26,83 @@ class _MenuPageState extends State<MenuPage> {
   /// key = food.id
   final Map<String, CartItem> cart = {};
 
+  final DiscountService _discountService = DiscountService();
+  final OrderService _orderService = OrderService();
+
+  List<Discount> discounts = [];
   Discount? appliedDiscount;
+  bool isLoadingDiscounts = true;
+
+  String customerName = '';
+  PaymentType selectedPaymentType = PaymentType.cash;
+
+  Future<void> _fetchDiscounts() async {
+    try {
+      final result = await _discountService.getDiscounts();
+
+      if (!mounted) return;
+
+      setState(() {
+        discounts = result;
+        isLoadingDiscounts = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        isLoadingDiscounts = false;
+      });
+
+      debugPrint('Fetch discounts error: $e');
+    }
+  }
+
+  final ProductService _productService = ProductService();
+
+  List<FoodItem> products = [];
+  bool isLoading = true;
+  String? errorMessage;
 
   List<String> get categories => [
     allCategory,
-    ...{for (final f in dummyFoods) f.category},
+    ...{for (final p in products) p.category},
   ];
 
-  List<FoodItem> get filteredFoods => dummyFoods.where((f) {
+  List<FoodItem> get filteredFoods => products.where((p) {
     final matchCategory =
-        selectedCategory == allCategory || f.category == selectedCategory;
-    final matchQuery = f.name.toLowerCase().contains(query.toLowerCase());
+        selectedCategory == allCategory || p.category == selectedCategory;
+
+    final matchQuery = p.name.toLowerCase().contains(query.toLowerCase());
+
     return matchCategory && matchQuery;
   }).toList();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchProducts();
+    _fetchDiscounts();
+  }
+
+  Future<void> _fetchProducts() async {
+    try {
+      final result = await _productService.getProducts();
+
+      if (!mounted) return;
+
+      setState(() {
+        products = result;
+        isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        errorMessage = e.toString();
+        isLoading = false;
+      });
+    }
+  }
 
   void _add(FoodItem food) {
     setState(() {
@@ -63,45 +132,45 @@ class _MenuPageState extends State<MenuPage> {
     });
   }
 
-  Future<void> _checkout() async {
-    final subtotal = cart.values.fold<int>(0, (s, e) => s + e.total);
-    final discount = appliedDiscount?.amountFor(subtotal) ?? 0;
-    final taxable = subtotal - discount;
-    final grand = taxable + (taxable * CheckoutPanel.taxRate).round();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Konfirmasi Pesanan'),
-        content: Text(
-          '${cart.length} jenis menu\n'
-          '${discount > 0 ? 'Diskon: -${formatRupiah(discount)}\n' : ''}'
-          'Total: ${formatRupiah(grand)}',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryColor,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Bayar'),
-          ),
-        ],
-      ),
+  Future<Map<String, dynamic>> _createOrder(
+    Map<String, dynamic> payload,
+  ) async {
+    final response = await _orderService.createOrder(
+      custName: payload['cust_name'] ?? '',
+      paymentType: payload['payment_type'],
+      discountCode: payload['discount'],
+      orderItems: List<Map<String, dynamic>>.from(payload['orderItems']),
     );
 
-    if (confirmed == true && mounted) {
-      // TODO: kirim order ke backend / simpan ke database
-      _clearCart();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Pesanan berhasil dibuat')));
-    }
+    return response;
+  }
+
+  Future<void> _checkout() async {
+    if (cart.isEmpty) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CheckoutPage(
+          items: cart.values.toList(),
+          discount: appliedDiscount,
+          customerName: customerName.trim().isEmpty
+              ? null
+              : customerName.trim(),
+          paymentType: selectedPaymentType,
+          onPaid: () {
+            _clearCart();
+
+            Navigator.pop(context);
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Pembayaran berhasil!')),
+            );
+          },
+          onCreateOrder: _createOrder,
+        ),
+      ),
+    );
   }
 
   @override
@@ -122,13 +191,30 @@ class _MenuPageState extends State<MenuPage> {
                 _buildCategories(),
                 const SizedBox(height: 20),
                 Expanded(
-                  child: foods.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'Menu tidak ditemukan',
-                            style: TextStyle(color: Color(0xFF858B98)),
+                  child: isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : errorMessage != null
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(errorMessage!),
+                              const SizedBox(height: 12),
+                              ElevatedButton(
+                                onPressed: () {
+                                  setState(() {
+                                    isLoading = true;
+                                    errorMessage = null;
+                                  });
+                                  _fetchProducts();
+                                },
+                                child: const Text('Coba Lagi'),
+                              ),
+                            ],
                           ),
                         )
+                      : foods.isEmpty
+                      ? const Center(child: Text('Menu tidak ditemukan'))
                       : GridView.builder(
                           itemCount: foods.length,
                           gridDelegate:
@@ -140,6 +226,7 @@ class _MenuPageState extends State<MenuPage> {
                               ),
                           itemBuilder: (context, i) {
                             final food = foods[i];
+
                             return FoodCard(
                               food: food,
                               qtyInCart: cart[food.id]?.qty ?? 0,
@@ -156,7 +243,14 @@ class _MenuPageState extends State<MenuPage> {
         // CHECKOUT
         CheckoutPanel(
           items: cart.values.toList(),
+          discounts: discounts,
           appliedDiscount: appliedDiscount,
+          onCustomerNameChanged: (value) {
+            customerName = value;
+          },
+          onPaymentTypeChanged: (value) {
+            selectedPaymentType = value;
+          },
           onApplyDiscount: (d) => setState(() => appliedDiscount = d),
           onRemoveDiscount: () => setState(() => appliedDiscount = null),
           onIncrement: (item) => setState(() => item.qty++),

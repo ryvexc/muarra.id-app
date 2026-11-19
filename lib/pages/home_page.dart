@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:muarra_app_v1/pages/discount_page.dart';
 import 'package:muarra_app_v1/pages/menu_page.dart';
 import 'package:muarra_app_v1/pages/settings_page.dart';
 import 'package:muarra_app_v1/widgets/app_sidebar.dart';
@@ -15,6 +16,7 @@ class _HomePageState extends State<HomePage> {
 
   final List<Widget> pages = [
     MenuPage(),
+    DiscountsPage(),
     const Center(child: Text('Users')),
     const Center(child: Text('Orders')),
     const Center(child: Text('Analytics')),

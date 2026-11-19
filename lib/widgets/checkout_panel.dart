@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:muarra_app_v1/core/constants/app_colors.dart';
 import 'package:muarra_app_v1/models/discount.dart';
 import 'package:muarra_app_v1/models/food_item.dart';
+import 'package:muarra_app_v1/models/payment_type.dart';
 
 class CheckoutPanel extends StatefulWidget {
   final List<CartItem> items;
+  final List<Discount> discounts;
   final Discount? appliedDiscount;
   final ValueChanged<Discount> onApplyDiscount;
   final VoidCallback onRemoveDiscount;
@@ -12,13 +14,16 @@ class CheckoutPanel extends StatefulWidget {
   final ValueChanged<CartItem> onDecrement;
   final VoidCallback onClear;
   final VoidCallback onCheckout;
-
-  static const double taxRate = 0.10;
+  final ValueChanged<String>? onCustomerNameChanged;
+  final ValueChanged<PaymentType>? onPaymentTypeChanged;
 
   const CheckoutPanel({
     super.key,
     required this.items,
+    required this.discounts,
     required this.appliedDiscount,
+    required this.onCustomerNameChanged,
+    required this.onPaymentTypeChanged,
     required this.onApplyDiscount,
     required this.onRemoveDiscount,
     required this.onIncrement,
@@ -33,48 +38,79 @@ class CheckoutPanel extends StatefulWidget {
 
 class _CheckoutPanelState extends State<CheckoutPanel> {
   static const Color successColor = Color(0xFF16A34A);
+  PaymentType _selectedPaymentType = PaymentType.cash;
+  PaymentType get selectedPaymentType => _selectedPaymentType;
 
   final TextEditingController _codeController = TextEditingController();
+  final TextEditingController _customerNameController = TextEditingController();
+
   String? _error;
 
   int get subtotal => widget.items.fold(0, (sum, e) => sum + e.total);
   int get discountAmount => widget.appliedDiscount?.amountFor(subtotal) ?? 0;
-  int get tax => ((subtotal - discountAmount) * CheckoutPanel.taxRate).round();
-  int get total => subtotal - discountAmount + tax;
+  int get total => subtotal - discountAmount;
+
+  String? get customerName {
+    final name = _customerNameController.text.trim();
+    return name.isEmpty ? null : name;
+  }
 
   @override
   void dispose() {
     _codeController.dispose();
+    _customerNameController.dispose();
     super.dispose();
   }
 
   void _applyCode() {
-    final input = _codeController.text.trim();
+    final input = _codeController.text.trim().toUpperCase();
 
     if (input.isEmpty) {
       setState(() => _error = 'Masukkan kode diskon');
       return;
     }
+
     if (widget.items.isEmpty) {
       setState(() => _error = 'Tambahkan menu terlebih dahulu');
       return;
     }
 
-    final discount = Discount.find(input);
+    if (widget.discounts.isEmpty) {
+      setState(() => _error = 'Diskon belum tersedia');
+      return;
+    }
+
+    Discount? discount;
+
+    for (final item in widget.discounts) {
+      if (item.code.toUpperCase() == input) {
+        discount = item;
+        break;
+      }
+    }
+
     if (discount == null) {
       setState(() => _error = 'Kode diskon tidak valid');
       return;
     }
+
+    if (discount.isExpired) {
+      setState(() => _error = 'Kode diskon sudah kedaluwarsa');
+      return;
+    }
+
     if (subtotal < discount.minSubtotal) {
       setState(
-        () => _error = 'Minimal belanja ${formatRupiah(discount.minSubtotal)}',
+        () => _error = 'Minimal belanja ${formatRupiah(discount!.minSubtotal)}',
       );
       return;
     }
 
     FocusScope.of(context).unfocus();
+
     setState(() => _error = null);
     _codeController.clear();
+
     widget.onApplyDiscount(discount);
   }
 
@@ -158,7 +194,7 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
                   ),
                 ],
                 const SizedBox(height: 8),
-                _SummaryRow(label: 'Pajak (10%)', value: formatRupiah(tax)),
+                // _SummaryRow(label: 'Pajak (10%)', value: formatRupiah(tax)),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Divider(height: 1),
@@ -258,10 +294,73 @@ class _CheckoutPanelState extends State<CheckoutPanel> {
       );
     }
 
-    // Belum ada kode -> tampilkan input
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 44,
+          child: TextField(
+            onChanged: widget.onCustomerNameChanged,
+            controller: _customerNameController,
+            textCapitalization: TextCapitalization.words,
+            decoration: InputDecoration(
+              hintText: 'Nama customer (opsional)',
+              hintStyle: const TextStyle(fontSize: 13),
+              prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: EdgeInsets.zero,
+              border: _inputBorder(Colors.black.withValues(alpha: 0.1)),
+              enabledBorder: _inputBorder(Colors.black.withValues(alpha: 0.1)),
+              focusedBorder: _inputBorder(AppColors.primaryColor),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        const Text(
+          'Payment Type',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF4B5563),
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        DropdownButtonFormField<PaymentType>(
+          initialValue: _selectedPaymentType,
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.payment_rounded, size: 18),
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            border: _inputBorder(Colors.black.withValues(alpha: 0.1)),
+            enabledBorder: _inputBorder(Colors.black.withValues(alpha: 0.1)),
+            focusedBorder: _inputBorder(AppColors.primaryColor),
+          ),
+          items: PaymentType.values.map((type) {
+            return DropdownMenuItem(
+              value: type,
+              child: Text(type.label, style: const TextStyle(fontSize: 13)),
+            );
+          }).toList(),
+          onChanged: (value) {
+            if (value == null) return;
+
+            setState(() => _selectedPaymentType = value);
+            widget.onPaymentTypeChanged?.call(value);
+          },
+        ),
+
+        const SizedBox(height: 16),
+
+        // DISCOUNT CODE
         Row(
           children: [
             Expanded(

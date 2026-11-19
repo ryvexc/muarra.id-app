@@ -25,6 +25,7 @@ class _AppSidebarState extends State<AppSidebar> {
 
   final List<Map<String, dynamic>> menus = [
     {'title': 'Home', 'icon': Icons.grid_view_rounded},
+    {'title': 'Diskon', 'icon': Icons.sell_outlined},
     {'title': 'Users', 'icon': Icons.people_outline_rounded},
     {'title': 'Orders', 'icon': Icons.shopping_bag_outlined},
     {'title': 'Analytics', 'icon': Icons.bar_chart_rounded},
