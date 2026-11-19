@@ -18,7 +18,6 @@ class AuthService {
       );
 
       final result = Map<String, dynamic>.from(response.data);
-
       final data = Map<String, dynamic>.from(result['data']);
 
       final token = data['token'] as String?;
@@ -32,8 +31,22 @@ class AuthService {
       return result;
     } on DioException catch (e) {
       final message = e.response?.data?['message'];
-
       throw Exception(message ?? 'Unable to login');
+    }
+  }
+
+  // Get currently logged-in user
+  Future<Map<String, dynamic>> getMe() async {
+    try {
+      final response = await _dio.post('/auth/me');
+
+      final result = Map<String, dynamic>.from(response.data);
+      final data = Map<String, dynamic>.from(result['data']);
+
+      return data;
+    } on DioException catch (e) {
+      final message = e.response?.data?['message'];
+      throw Exception(message ?? 'Unable to get user data');
     }
   }
 
@@ -43,7 +56,7 @@ class AuthService {
 
   Future<bool> checkAuth() async {
     try {
-      final response = await _dio.get('/auth/me');
+      final response = await _dio.post('/auth/me');
 
       return response.statusCode == 200;
     } on DioException catch (e) {

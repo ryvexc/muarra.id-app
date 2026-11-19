@@ -12,7 +12,7 @@ class CheckoutPage extends StatelessWidget {
   final Discount? discount;
   final String? customerName;
   final PaymentType paymentType;
-  final VoidCallback onPaid;
+  final void Function(Map<String, dynamic> orderResponse) onPaid;
 
   // Callback untuk membuat order ke Laravel API.
   // Return value harus berupa response JSON dalam bentuk Map.
@@ -36,7 +36,7 @@ class CheckoutPage extends StatelessWidget {
   Map<String, dynamic> get orderPayload => {
     'cust_name': customerName ?? '',
     'payment_type': paymentType.name,
-    'discount': discount?.code,
+    if (discount != null) 'discount_code': discount!.code,
     'orderItems': items
         .map((item) => {'product_id': item.food.id, 'quantity': item.qty})
         .toList(),
@@ -228,8 +228,8 @@ class CheckoutPage extends StatelessWidget {
                   onConfirmed: () async {
                     // Cash/card: order dibuat terlebih dahulu.
                     // Kalau API gagal, slider akan di-reset.
-                    await onCreateOrder(orderPayload);
-                    onPaid();
+                    final response = await onCreateOrder(orderPayload);
+                    onPaid(response);
                   },
                 ),
               ],

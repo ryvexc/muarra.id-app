@@ -9,6 +9,7 @@ import 'package:muarra_app_v1/features/discounts/services/discount_service.dart'
 import 'package:muarra_app_v1/features/checkout/pages/checkout_page.dart';
 import 'package:muarra_app_v1/models/payment_type.dart';
 import 'package:muarra_app_v1/features/orders/services/order_service.dart';
+import 'package:muarra_app_v1/features/checkout/pages/note_page.dart';
 
 class MenuPage extends StatefulWidget {
   const MenuPage({super.key});
@@ -138,7 +139,7 @@ class _MenuPageState extends State<MenuPage> {
     final response = await _orderService.createOrder(
       custName: payload['cust_name'] ?? '',
       paymentType: payload['payment_type'],
-      discountCode: payload['discount'],
+      discountCode: payload['discount_code'],
       orderItems: List<Map<String, dynamic>>.from(payload['orderItems']),
     );
 
@@ -147,6 +148,11 @@ class _MenuPageState extends State<MenuPage> {
 
   Future<void> _checkout() async {
     if (cart.isEmpty) return;
+
+    final subtotal = cart.values.fold<int>(0, (sum, item) => sum + item.total);
+
+    final discountAmount = appliedDiscount?.amountFor(subtotal) ?? 0;
+    final grandTotal = subtotal - discountAmount;
 
     Navigator.push(
       context,
@@ -158,15 +164,55 @@ class _MenuPageState extends State<MenuPage> {
               ? null
               : customerName.trim(),
           paymentType: selectedPaymentType,
-          onPaid: () {
-            _clearCart();
 
-            Navigator.pop(context);
+          // Dipanggil setelah pembayaran confirmed
+          onPaid: (orderResponse) {
+            final order = orderResponse['data'] is Map
+                ? Map<String, dynamic>.from(orderResponse['data'])
+                : Map<String, dynamic>.from(orderResponse);
 
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Pembayaran berhasil!')),
+            final receipt = ReceiptData(
+              orderNumber: (order['id'] ?? order['order_number'] ?? '-')
+                  .toString(),
+              customerName: customerName.trim().isEmpty
+                  ? 'Guest'
+                  : customerName.trim(),
+              date:
+                  DateTime.tryParse(order['created_at']?.toString() ?? '') ??
+                  DateTime.now(),
+              items: cart.values.map((item) {
+                return ReceiptItem(
+                  name: item.food.name,
+                  quantity: item.qty,
+                  price: item.food.price,
+                );
+              }).toList(),
+              subtotal: subtotal,
+              discount: discountAmount,
+              total: (order['total'] as num?)?.toInt() ?? grandTotal,
+              paymentMethod: selectedPaymentType.label,
+            );
+
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => NotePage(
+                  receipt: receipt,
+                  onFinished: () {
+                    // Tutup NotePage
+                    Navigator.pop(context);
+
+                    // Tutup CheckoutPage, kembali ke MenuPage
+                    Navigator.pop(context);
+
+                    // Kosongkan keranjang
+                    _clearCart();
+                  },
+                ),
+              ),
             );
           },
+
           onCreateOrder: _createOrder,
         ),
       ),
